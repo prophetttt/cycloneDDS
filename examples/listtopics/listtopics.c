@@ -4,6 +4,30 @@
 #include <assert.h>
 #include "dds/dds.h"
 
+/*
+  examples/listtopics/listtopics.c
+
+  A tiny "topic viewer" for Cyclone DDS.
+
+  It subscribes to discovery built-in topics and prints what it observes.
+
+  Main data source:
+    - DDS_BUILTIN_TOPIC_DCPSTOPIC (DCPSTopic): provides topic_name/type_name for
+      discovered topics.
+
+  Secondary data sources (used only to diagnose likely configuration issues):
+    - DDS_BUILTIN_TOPIC_DCPSPUBLICATION
+    - DDS_BUILTIN_TOPIC_DCPSSUBSCRIPTION
+
+  Why a waitset + readcondition?
+    Waitsets are level-triggered. Attaching a readcondition and then taking
+    from that same condition prevents "wake up but filter out samples" loops.
+
+  Memory model:
+    dds_take() loans sample memory to the application; always call
+    dds_return_loan() for the returned samples.
+*/
+
 /* Compile time constants representing the (DCPSPublication and DCPSSubscription) built-in
    topics that used for monitoring whether we should have discovered some topics on the
    DCPSTopic built-in topic. */
@@ -18,6 +42,7 @@ struct keystr {
 
 static char *keystr (struct keystr *gs, const dds_builtintopic_topic_key_t *g)
 {
+  /* Format the 16-byte key as hex with separators for readability. */
   (void) snprintf (gs->v, sizeof (gs->v),
                    "%02x%02x%02x%02x:%02x%02x%02x%02x:%02x%02x%02x%02x:%02x%02x%02x%02x",
                    g->d[0], g->d[1], g->d[2], g->d[3], g->d[4], g->d[5], g->d[6], g->d[7],
@@ -27,6 +52,7 @@ static char *keystr (struct keystr *gs, const dds_builtintopic_topic_key_t *g)
 
 static const char *instance_state_str (dds_instance_state_t s)
 {
+  /* Built-in topic samples have instance state changes that reflect lifecycle. */
   switch (s)
   {
     case DDS_ALIVE_INSTANCE_STATE: return "alive";
@@ -52,6 +78,7 @@ static bool process_topic (dds_entity_t readcond)
   bool topics_seen = false;
   for (int32_t i = 0; i < n; i++)
   {
+    /* DCPSTopic sample layout is defined by the DDS built-in topic type. */
     dds_builtintopic_topic_t const * const sample = samples[i];
     struct keystr gs;
     printf ("%s: %s", instance_state_str (infos[i].instance_state), keystr (&gs, &sample->key));
@@ -75,6 +102,12 @@ static bool process_topic (dds_entity_t readcond)
 
 static bool process_pubsub (dds_entity_t ep_readconds[])
 {
+  /*
+     Detect whether remote endpoints exist by sampling DCPSPublication/
+     DCPSSubscription built-in topics. This is used only for producing a hint:
+     if endpoints exist but DCPSTopic yields no application topics, topic
+     discovery is likely disabled in the configuration.
+  */
   bool endpoints_exist = false;
   for (size_t k = 0; k < sizeof (ep_topics) / sizeof (ep_topics[0]) && !endpoints_exist; k++)
   {
@@ -98,6 +131,40 @@ int main (int argc, char **argv)
 {
   (void)argc;
   (void)argv;
+
+   (void) unsetenv ("CYCLONEDDS_URI");
+
+   if (argc < 2 || argv[1] == NULL || argv[1][0] == '\0')
+  {
+    fprintf (stderr, "usage: %s <network-interface>\n", argv[0]);
+    return 2;
+  }
+
+  const char *ifname = argv[1];
+
+   char config_xml[1024];
+  (void) snprintf (
+    config_xml, sizeof (config_xml),
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n"
+    "<CycloneDDS xmlns=\"https://cdds.io/config\">\n"
+    "  <Domain Id=\"any\">\n"
+    "    <General>\n"
+    "      <Interfaces>\n"
+    "        <NetworkInterface name=\"%s\"/>\n"
+    "      </Interfaces>\n"
+    "      <AllowMulticast>true</AllowMulticast>\n"
+    "    </General>\n"
+    "    <Discovery>\n"
+    "      <EnableTopicDiscoveryEndpoints>true</EnableTopicDiscoveryEndpoints>\n"
+    "    </Discovery>\n"
+    "  </Domain>\n"
+    "</CycloneDDS>\n",
+    ifname);
+
+    if (setenv("CYCLONEDDS_URI", config_xml, 1) != 0) {
+    perror("Failed to set CYCLONEDDS_URI");
+    return -1;
+}
 
   const dds_entity_t participant = dds_create_participant (DDS_DOMAIN_DEFAULT, NULL, NULL);
   if (participant < 0)
@@ -157,6 +224,7 @@ int main (int argc, char **argv)
   const dds_time_t tstop = dds_time () + DDS_SECS (10);
   while (dds_waitset_wait_until (waitset, NULL, 0, tstop) > 0)
   {
+    /* Process any topic discovery samples that triggered the waitset. */
     if (process_topic (readcond))
       topics_seen = true;
 

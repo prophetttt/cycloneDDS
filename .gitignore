@@ -8,3 +8,5 @@ gen.*
 build/
 docs/manual/ddsc_api_docs/
 *~
+buildMusl/
+buildMusl*

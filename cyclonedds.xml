@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CycloneDDS xmlns="https://cdds.io/config">
+    <Domain Id="any">
+        <General>
+            <Interfaces>
+                <NetworkInterface name="enp3s0f0"/> 
+            </Interfaces>
+            <AllowMulticast>true</AllowMulticast>
+        </General>
+
+        <Discovery>
+            <EnableTopicDiscoveryEndpoints>true</EnableTopicDiscoveryEndpoints>
+        </Discovery>
+    </Domain>
+</CycloneDDS>
