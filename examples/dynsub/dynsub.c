@@ -445,12 +445,44 @@ int main (int argc, char **argv)
 {
   dds_return_t ret = 0;
   dds_entity_t topic = 0;
-  
-  if (argc != 2)
+
+
+   (void) unsetenv ("CYCLONEDDS_URI");
+
+
+ if (argc < 3 || argv[1] == NULL || argv[1][0] == '\0' || argv[2] == NULL || argv[2][0] == '\0')
   {
-    fprintf (stderr, "usage: %s topicname\n", argv[0]);
+    fprintf (stderr, "usage: %s <network-interface> <topicname>\n", argv[0]);
     return 2;
   }
+
+  const char *ifname = argv[1];
+  const char *topicname = argv[2];
+
+   char config_xml[1024];
+  (void) snprintf (
+    config_xml, sizeof (config_xml),
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n"
+    "<CycloneDDS xmlns=\"https://cdds.io/config\">\n"
+    "  <Domain Id=\"any\">\n"
+    "    <General>\n"
+    "      <Interfaces>\n"
+    "        <NetworkInterface name=\"%s\"/>\n"
+    "      </Interfaces>\n"
+    "      <AllowMulticast>true</AllowMulticast>\n"
+    "    </General>\n"
+    "    <Discovery>\n"
+    "      <EnableTopicDiscoveryEndpoints>true</EnableTopicDiscoveryEndpoints>\n"
+    "    </Discovery>\n"
+    "  </Domain>\n"
+    "</CycloneDDS>\n",
+    ifname);
+
+    if (setenv("CYCLONEDDS_URI", config_xml, 1) != 0) {
+    perror("Failed to set CYCLONEDDS_URI");
+    return -1;
+}
+  
 
   participant = dds_create_participant (DDS_DOMAIN_DEFAULT, NULL, NULL);
   if (participant < 0)
@@ -462,7 +494,7 @@ int main (int argc, char **argv)
   // The one magic step: get a topic and type object ...
   DDS_XTypes_TypeObject *xtypeobj;
   typecache = ddsrt_hh_new (1, typecache_hash, typecache_equal);
-  if ((ret = get_topic_and_typeobj (argv[1], DDS_SECS (10), &topic, &xtypeobj)) < 0)
+  if ((ret = get_topic_and_typeobj (argv[2], DDS_SECS (10), &topic, &xtypeobj)) < 0)
   {
     fprintf (stderr, "get_topic_and_typeobj: %s\n", dds_strretcode (ret));
     goto error;
